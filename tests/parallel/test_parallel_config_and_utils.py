@@ -53,6 +53,9 @@ def test_build_block_device_map_validates_balance():
     with pytest.raises(ValueError, match="sum"):
         build_block_device_map(n_layers=4, devices=["cpu", "cpu"], balance=[1, 2])
 
+    with pytest.raises(ValueError, match="Only pass active devices"):
+        build_block_device_map(n_layers=2, devices=["cpu", "cpu", "cpu", "cpu"], balance=[1, 1, 0, 0])
+
 
 def test_single_process_reduction_helpers_return_local_values():
     assert all_reduce_mean(3.0) == 3.0

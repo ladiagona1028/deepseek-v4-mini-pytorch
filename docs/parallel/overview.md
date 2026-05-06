@@ -42,12 +42,34 @@ Configurable knobs:
 | `balance` | Optional comma-separated layer counts per device, for example `2,2,4`. |
 | `model_parallel_strategy` | Currently documents intent; the implemented path is layerwise/blockwise placement. |
 
+V1 intentionally does not allow empty device slots. Every `balance` entry must be greater than zero, so the number of devices must be less than or equal to `n_layers`. For example, `n_layers=2` with `devices=cpu,cpu,cpu,cpu` and `balance=1,1,0,0` is rejected. Pass only active devices, for example `devices=cpu,cpu` and `balance=1,1`.
+
 Main helpers:
 
 - `infer_auto_balance(n_layers, n_devices)` distributes layers as evenly as possible.
 - `build_block_device_map(n_layers, devices, balance)` returns the per-layer placement plan.
 - `ModelParallelDeepSeekV4LM(model, devices, balance)` wraps an existing `DeepSeekV4LM`.
 - `wrap_model_parallel(...)` is the convenience constructor.
+
+### Optimizer Order
+
+For training, build the optimizer after wrapping the model. The wrapper moves submodules to their target devices, so the optimizer must see the final parameter objects and placements.
+
+Correct order:
+
+```python
+model = DeepSeekV4LM(config)
+model = wrap_model_parallel(model, devices=["cuda:0", "cuda:1"], balance=[8, 8])
+optimizer = build_optimizer(model, train_config)
+```
+
+Avoid this order:
+
+```python
+model = DeepSeekV4LM(config)
+optimizer = build_optimizer(model, train_config)
+model = wrap_model_parallel(model, devices=["cuda:0", "cuda:1"], balance=[8, 8])
+```
 
 ## CLI
 

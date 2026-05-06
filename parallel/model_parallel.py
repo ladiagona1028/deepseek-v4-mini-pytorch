@@ -40,7 +40,11 @@ def build_block_device_map(
     if sum(balance) != n_layers:
         raise ValueError(f"sum(balance) must equal n_layers={n_layers}, got {sum(balance)}")
     if any(x <= 0 for x in balance):
-        raise ValueError(f"balance entries must be > 0, got {balance}")
+        raise ValueError(
+            "balance entries must be > 0 in v1. "
+            "Only pass active devices, so len(devices) must be <= n_layers. "
+            f"Got n_layers={n_layers}, devices={len(normalized)}, balance={balance}"
+        )
 
     block_devices: list[torch.device] = []
     for device, count in zip(normalized, balance):

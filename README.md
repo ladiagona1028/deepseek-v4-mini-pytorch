@@ -360,6 +360,14 @@ Implemented now:
 - **Layerwise model parallelism:** whole `DeepSeekV4LM` blocks are assigned to ordered devices and activations are moved between block boundaries.
 - **CPU verification:** config validation, one-process `gloo` DDP, sampler behavior, metric reductions, model-parallel equivalence on CPU, and mHC wrapper compatibility.
 
+V1 only accepts active model-parallel devices: every `balance` entry must be greater than zero, so `len(devices) <= n_layers`. For training, wrap the model before building the optimizer:
+
+```python
+model = DeepSeekV4LM(config)
+model = wrap_model_parallel(model, devices=["cuda:0", "cuda:1"], balance=[8, 8])
+optimizer = build_optimizer(model, train_config)
+```
+
 Not implemented by design: custom CUDA kernels, FP4/FP8 training kernels, NCCL topology scheduling, DualPipe, and true all-to-all expert parallelism.
 
 ```bash

@@ -37,6 +37,30 @@ parallel/
 4. Run layerwise model parallel on two GPUs if available.
 5. Treat hybrid DDP + model parallel as future work.
 
+## Model-Parallel Constraints
+
+V1 only accepts active devices. That means every `balance` entry must be greater than zero and `len(devices)` must be less than or equal to the number of model layers.
+
+Rejected:
+
+```python
+build_block_device_map(n_layers=2, devices=["cpu", "cpu", "cpu", "cpu"], balance=[1, 1, 0, 0])
+```
+
+Use:
+
+```python
+build_block_device_map(n_layers=2, devices=["cpu", "cpu"], balance=[1, 1])
+```
+
+When training model-parallel runs, build the optimizer after wrapping the model:
+
+```python
+model = DeepSeekV4LM(config)
+model = wrap_model_parallel(model, devices=["cuda:0", "cuda:1"], balance=[8, 8])
+optimizer = build_optimizer(model, train_config)
+```
+
 ## CPU-Testable Surface
 
 The current tests intentionally cover only CPU-safe behavior:
